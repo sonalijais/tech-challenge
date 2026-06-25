@@ -10,6 +10,7 @@ import (
 	"github.com/acai-travel/tech-challenge/internal/pb"
 	"github.com/twitchtv/twirp"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"golang.org/x/sync/errgroup"
 )
 
 var _ pb.ChatService = (*Server)(nil)
@@ -29,44 +30,68 @@ func NewServer(repo *model.Repository, assist Assistant) *Server {
 }
 
 func (s *Server) StartConversation(ctx context.Context, req *pb.StartConversationRequest) (*pb.StartConversationResponse, error) {
+	message := strings.TrimSpace(req.GetMessage())
+	if message == "" {
+		return nil, twirp.RequiredArgumentError("message")
+	}
+	now := time.Now()
+
 	conversation := &model.Conversation{
 		ID:        primitive.NewObjectID(),
 		Title:     "Untitled conversation",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: now,
+		UpdatedAt: now,
 		Messages: []*model.Message{{
 			ID:        primitive.NewObjectID(),
 			Role:      model.RoleUser,
 			Content:   req.GetMessage(),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			CreatedAt: now,
+			UpdatedAt: now,
 		}},
 	}
 
-	if strings.TrimSpace(req.GetMessage()) == "" {
-		return nil, twirp.RequiredArgumentError("message")
-	}
+	var (
+		title string
+		reply string
+	)
 
-	// choose a title
-	title, err := s.assist.Title(ctx, conversation)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to generate conversation title", "error", err)
-	} else {
-		conversation.Title = title
-	}
+	// generate title and reply concurrently to reduce request latency.
+	g, gctx := errgroup.WithContext(ctx)
 
-	// generate a reply
-	reply, err := s.assist.Reply(ctx, conversation)
-	if err != nil {
+	// generate title concurrently
+	g.Go(func() error {
+
+		generatedTitle, err := s.assist.Title(gctx, conversation)
+		if err != nil {
+			slog.ErrorContext(gctx, "Failed to generate conversation title", "error", err)
+			return nil
+		}
+
+		if strings.TrimSpace(generatedTitle) != "" {
+			title = generatedTitle
+		}
+		return nil
+	})
+
+	// generate assistant reply concurrently
+	g.Go(func() error {
+		var err error
+		reply, err = s.assist.Reply(gctx, conversation)
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+
+	conversation.Title = title
 
 	conversation.Messages = append(conversation.Messages, &model.Message{
 		ID:        primitive.NewObjectID(),
 		Role:      model.RoleAssistant,
 		Content:   reply,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: now,
+		UpdatedAt: now,
 	})
 
 	if err := s.repo.CreateConversation(ctx, conversation); err != nil {

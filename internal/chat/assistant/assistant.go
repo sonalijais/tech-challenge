@@ -29,15 +29,16 @@ func (a *Assistant) Title(ctx context.Context, conv *model.Conversation) (string
 
 	slog.InfoContext(ctx, "Generating title for conversation", "conversation_id", conv.ID)
 
-	msgs := make([]openai.ChatCompletionMessageParamUnion, len(conv.Messages))
+	// only the first user message is used when generating a conversation title.
+	msgs := make([]openai.ChatCompletionMessageParamUnion, 2)
 
-	msgs[0] = openai.AssistantMessage("Generate a concise, descriptive title for the conversation based on the user message. The title should be a single line, no more than 80 characters, and should not include any special characters or emojis.")
-	for i, m := range conv.Messages {
-		msgs[i] = openai.UserMessage(m.Content)
-	}
+	msgs[0] = openai.AssistantMessage("Generate a concise, descriptive title for the conversation based on the user message. The title should be a single line, no more than 80 characters, should summarize the topic, " +
+		"and must not answer the question. Return only the title and should not include any special characters or emojis")
+
+	msgs[1] = openai.UserMessage(conv.Messages[0].Content)
 
 	resp, err := a.cli.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model:    openai.ChatModelO1,
+		Model:    openai.ChatModelGPT4_1,
 		Messages: msgs,
 	})
 
