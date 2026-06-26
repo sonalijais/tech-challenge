@@ -10,10 +10,12 @@ import (
 	"github.com/acai-travel/tech-challenge/internal/pb"
 	"github.com/twitchtv/twirp"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 )
 
 var _ pb.ChatService = (*Server)(nil)
+var tracer = otel.Tracer("chat-server")
 
 type Assistant interface {
 	Title(ctx context.Context, conv *model.Conversation) (string, error)
@@ -30,6 +32,9 @@ func NewServer(repo *model.Repository, assist Assistant) *Server {
 }
 
 func (s *Server) StartConversation(ctx context.Context, req *pb.StartConversationRequest) (*pb.StartConversationResponse, error) {
+	ctx, span := tracer.Start(ctx, "StartConversation")
+	defer span.End()
+
 	message := strings.TrimSpace(req.GetMessage())
 	if message == "" {
 		return nil, twirp.RequiredArgumentError("message")

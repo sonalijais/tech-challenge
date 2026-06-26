@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,11 +24,19 @@ func main() {
 
 	server := chat.NewServer(repo, assist)
 
+	// Initialize OpenTelemetry
+	shutdown, err := httpx.InitMetrics()
+	if err != nil {
+		panic(err)
+	}
+	defer shutdown(context.Background())
+
 	// Configure handler
 	handler := mux.NewRouter()
 	handler.Use(
 		httpx.Logger(),
 		httpx.Recovery(),
+		httpx.Metrics(),
 	)
 
 	handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

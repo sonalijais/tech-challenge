@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/acai-travel/tech-challenge/internal/chat/assistant"
 	"github.com/acai-travel/tech-challenge/internal/chat/model"
 	. "github.com/acai-travel/tech-challenge/internal/chat/testing"
 	"github.com/acai-travel/tech-challenge/internal/pb"
@@ -40,4 +41,81 @@ func TestServer_DescribeConversation(t *testing.T) {
 			t.Fatalf("expected twirp.NotFound error, got %v", err)
 		}
 	}))
+}
+
+func TestServer_StartConversation(t *testing.T) {
+	ctx := context.Background()
+
+	srv := NewServer(
+		model.New(ConnectMongo()),
+		assistant.New(),
+	)
+
+	t.Run("start conversation creates conversation with title and reply",
+		WithFixture(func(t *testing.T, f *Fixture) {
+
+			req := &pb.StartConversationRequest{
+				Message: "What is the weather in Barcelona today?",
+			}
+
+			resp, err := srv.StartConversation(ctx, req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if resp.GetConversationId() == "" {
+				t.Fatal("expected conversation id")
+			}
+
+			if resp.GetTitle() == "" {
+				t.Fatal("expected title")
+			}
+
+			if resp.GetReply() == "" {
+				t.Fatal("expected assistant reply")
+			}
+			out, err := srv.DescribeConversation(
+				ctx,
+				&pb.DescribeConversationRequest{
+					ConversationId: resp.GetConversationId(),
+				},
+			)
+			if err != nil {
+				t.Fatalf("DescribeConversation() returned error: %v", err)
+			}
+
+			conv := out.GetConversation()
+
+			if conv.GetTitle() != resp.GetTitle() {
+				t.Errorf(
+					"title mismatch: got=%q want=%q",
+					conv.GetTitle(),
+					resp.GetTitle(),
+				)
+			}
+
+			if len(conv.Messages) != 2 {
+				t.Fatalf(
+					"expected 2 messages, got %d",
+					len(conv.Messages),
+				)
+			}
+
+			if conv.Messages[0].Content != req.GetMessage() {
+				t.Errorf(
+					"unexpected first message: got=%q want=%q",
+					conv.Messages[0].Content,
+					req.GetMessage(),
+				)
+			}
+
+			if conv.Messages[1].Content != resp.GetReply() {
+				t.Errorf(
+					"unexpected assistant reply: got=%q want=%q",
+					conv.Messages[1].Content,
+					resp.GetReply(),
+				)
+			}
+		}),
+	)
 }
